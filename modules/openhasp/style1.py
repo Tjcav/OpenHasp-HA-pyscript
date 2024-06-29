@@ -1,26 +1,29 @@
 PAL_BLACK = "#000000"
+PAL_WHITE = "#FFFFFF"
 PAL_DARKBLUE = "#0B60B0"
 PAL_LIGHTBLUE = "#40A2D8"
 PAL_BEIGE = "#F0EDCF"
 
-style = (  {"page.gb_color":       PAL_BLACK,
-            
-            "text.font":           32,
-            "text.color":          PAL_LIGHTBLUE,
+style = (  {"page.gb_color":       PAL_WHITE,
+            "text.font":           1,
+            "text.color":          PAL_WHITE,
             "text.align":          "center",
             "text.on.color":       "Gold",
             "text.off.color":      "Linen",
             
-            "btn.text_color":      "Linen",
-            "btn.font":            32,
-            "btn.bg_color":        PAL_BLACK,
+            "btn.text_color":      PAL_WHITE,
+            "btn.font":            1,
+            "btn.bg_color":        PAL_BEIGE,
             "btn.radius":          20,
             "btn.align":           "center",
             "btn.border_color":    PAL_BEIGE,
             "btn.border_width":    2,
             "btn.on.bg_color":     PAL_DARKBLUE,
             "btn.off.bg_color":    PAL_BLACK,
-            "btn.icon.font":       32,
+            "btn.icon.font":       1,
+
+            "msgbox.text_color":    PAL_BLACK,
+            "msgbox.border_color":  PAL_BLACK,
 
             "switch.border_color":  PAL_LIGHTBLUE,
             "switch.off.bg_color":  PAL_BLACK,
@@ -37,7 +40,7 @@ style = (  {"page.gb_color":       PAL_BLACK,
             "nav.bg_color":         PAL_BLACK,
             "nav.active.text_color": "Linen",
             "nav.active.bg_color":  PAL_DARKBLUE,
-            "nav.font":             32,
+            "nav.font":             22,
             
             "line.color":          "Linen",
             "line.width":          10,

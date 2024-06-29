@@ -68,6 +68,8 @@ class Obj():
     def Obj__init__(self, design, objType=None, coord=None, size=None, extraPar={}):
         self.design = design
         self.objType = objType
+        if not hasattr(self, 'params'):
+            self.params = {}
         if objType is not None:
             self.params["obj"] = objType
         if extraPar is not None:
@@ -84,6 +86,21 @@ class Obj():
 
         # Add this object to the design, page and ID will be added there
         self.design.addObj(self)
+        if objType is not None:
+            self._reorder_params()
+
+    def _reorder_params(self):
+        # Desired order for some keys
+        desired_order = ["page", "id", "obj"]
+
+        # Create an ordered dictionary with the desired keys first
+        ordered_dict = {key: self.params[key] for key in desired_order}
+
+        # Add the remaining keys in any order
+        for key, value in self.params.items():
+            if key not in ordered_dict:
+                ordered_dict[key] = value
+
     def visible(self, isVisible):
         self.setParam('hidden', not isVisible)
 
@@ -289,7 +306,6 @@ class Page(Obj):
         self.Obj__init__(design=design, objType=None, extraPar={}) # Will add the page to the design
         self.params["page"] = pageNbr
         self.setParam("bg_color", None, "page.gb_color")
-
         self.isStartupPage = isStartupPage
         self.objs = {}
         if pageNbr == 0:
@@ -1113,11 +1129,11 @@ class AnalogClock(ComposedObj):
 class Manager():
     class State:
         def __init__(self, entity, enabled):
-             self.entity = entity
-             self.enabled = enabled
-             self.state = None
-             self.noActivityCnt = 0
-             self.set("unknown")
+            self.entity = entity
+            self.enabled = enabled
+            self.state = None
+            self.noActivityCnt = 0
+            self.set("unknown")
 
         def activityDetected(self):
             self.noActivityCnt = 0
@@ -1152,6 +1168,7 @@ class Manager():
 
     def Manager__init__(self, name, screenSize, startupPage=1, keepHAState=False, style=None):
         global screenName2manager
+        self.sending_design = False
         self.name = name
         self.sendHeartbeat = False
         self.design = Design(self, screenSize, style)
@@ -1221,8 +1238,8 @@ class Manager():
 
     def sendDesign(self):
         if logSendDesign: log.info(f"Sending design to \"{self.name}\" manager={self}")
-
-        self.state.incAttr("desing_sent")
+        self.sending_design = True
+        self.state.incAttr("design_sent")
         self.state.setAttr("stale_message", 0)
 
         self.sendIdle("off")
@@ -1250,6 +1267,7 @@ class Manager():
 
         task.sleep(5)
         self.design.msgbox.message(text="Design Received from HA", extraPar={"text_color":"#FFFFFF", "bg_color":"green","auto_close": 100})
+        self.sending_design = False
 
     def gotoPage(self, pageNbr):
         self.sendCmd("page", f"{pageNbr}")

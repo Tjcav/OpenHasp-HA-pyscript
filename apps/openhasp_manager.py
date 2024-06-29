@@ -1,10 +1,12 @@
 import openhasp as oh
 import openhasp.mdi as mdi
-from openhasp import Manager, ComposedObj, triggerFactory_entityChange
+from openhasp import Manager, ComposedObj, triggerFactory_entityChange, triggerFactory_time
 from openhasp.style1 import style as myStyle
 from homeassistant.helpers.template import Template
-
 import math
+
+KEYPAD_TIMEOUT = 5
+
 def alarm2state(design, state):
     if state == "disarmed":
         text = "DISARMED"
@@ -109,13 +111,12 @@ class MyComposedObj(ComposedObj):
             self.updateLineObject()
 
 class HaspManager(Manager):
-
     def __init__(self, friendlyName, name, screenSize):
         self.Manager__init__(name, screenSize, keepHAState=True, style=myStyle)   # Workaround as calling super() is not supported by pyscript
         self.logTimeEvents = False
         self.logEntityEvents = True
         self.friendlyName = friendlyName
-        #self.trigger_alarm_change = triggerFactory_entityChange('alarm_control_panel.alarmo', self.alarm_state_change, 'alarm_state_change', callNow=False)
+        self.trigger_alarm_change = triggerFactory_entityChange('alarm_control_panel.alarmo', self._alarm_state_change_or_timeout, 'alarm_state_change', callNow=False)
 
         #self.sendPeriodicHeatbeats()
         design = self.design
@@ -149,7 +150,6 @@ class HaspManager(Manager):
         y += 30
 
         oh.Page(design, 2)
-        #self.gotoPage(2)
         self.alarm_pin_display = oh.Label(design, coord=(0, 40), size=(240, 30), text="", font=16, align="Center", textColor="black", extraPar={"click":0})
         self.alarm_pin = ""
         y=70
@@ -158,21 +158,40 @@ class HaspManager(Manager):
             actionOnValFunc=self._alarmKeypadActionOnVal, extraPar={"border_side":15, "text_font40":20})
         self.alarm_arm_modes = oh.BtnMatrix(design, coord=(10, y+210), size=(220,40), options=["\uE68A Arm Home","\uE99D Arm Away"], extraPar={"toggle":1,"one_check":1,"val":0, "bg_opa":0, "border_opa":0}, actionOnValFunc=self._alarmModeActionOnVal)
         self.alarm_disarm = oh.Label(design, coord=(10, y+215), size=(220,25), text="Disarm", textColor="red")
-        
+
     def _onAlarmBtnPushed(self, cookie):
         self.alarm_arm_modes.visible(alarm_control_panel.alarmo == 'disarmed')
         self.alarm_disarm.visible(alarm_control_panel.alarmo != 'disarmed')
         self.alarm_pin = ""
         self.alarm_pin_display.setParam('text',"")
         self.gotoPage(2)
+        self._alarm_keypad_timer_start()
+
+    def _alarm_state_change_or_timeout(self, cookie):
+        if self._alarm_keypad_timer_stop is not None:
+            self._alarm_keypad_timer_stop()
+        if self.design.currPageNbr == 2:
+            self.gotoPage(1)
+
+    def _alarm_keypad_timer_start(self):
+        self._keypad_time_trigger = triggerFactory_time(f"once(now+{KEYPAD_TIMEOUT})", self._alarm_state_change_or_timeout, 'keypad timeout')
+
+    def _alarm_keypad_timer_stop(self):
+        self._keypad_time_trigger.func.trigger_stop()
+
+    def _alarm_keypad_timer_restart(self):
+        self._keypad_time_trigger.func.trigger_stop()
+        self._alarm_keypad_timer_start()
 
     def _alarmModeActionOnVal(self, obj, val):
+        self._alarm_keypad_timer_restart()
         if val == 0:
             self.arm_mode = "alarm_arm_home"
         else:
             self.arm_mode = "alarm_arm_away"
 
     def _alarmKeypadActionOnVal(self, obj, val):
+        self._alarm_keypad_timer_restart()
         self.alarm_pin += str(val + 1)
         self.alarm_pin_display.setParam('text', '*' * len(self.alarm_pin))
         if len(self.alarm_pin) >= 4:
@@ -185,7 +204,7 @@ class HaspManager(Manager):
                     else:
                         alarmo.arm(entity_id="alarm_control_panel.alarmo", mode="home")
                         action_msg = "ARMING: HOME"
-                    self.design.msgbox.message(text=action_msg, options=[], auto_close=2000, extraPar={"x":0,"y":100,"w":240,"h":40,"value_font":22,"bg_color":"#A8290E","text_color":"#FFFFFF","border_color": "#5B0000","radius":10,"border_side":15,"click":0,"bg_grad_dir":"0", "click":0})
+                    self.design.msgbox.message(text=action_msg, options=[], auto_close=2000, extraPar={"x":0,"y":100,"w":240,"h":40,"value_font":22,"bg_color":"orange","text_color":"#FFFFFF","border_color": "#5B0000","radius":10,"border_side":15,"click":0,"bg_grad_dir":"0", "click":0})
                 else:
                     action_msg = "DISARMING"
                     alarmo.disarm(entity_id="alarm_control_panel.alarmo")
@@ -199,14 +218,6 @@ class HaspManager(Manager):
     def _validate_pin(self, input_pin):
         pin_codes_template = Template( "{{ expand(label_entities('pin_codes')) | map(attribute='state') | join(' ') }}", hass)
         return input_pin in pin_codes_template.async_render()
-
-    def alarm_state_change(self, cookie):
-        if self.design.currPageNbr == 2:
-            self.gotoPage(1)
-
-    # TODO:
-    #   - if on page 2 and timeout, go to page 1
-
 
 managers = [] # This needs to be global so that it remains in scope
 
