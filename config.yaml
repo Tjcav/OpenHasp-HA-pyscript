@@ -1,0 +1,13 @@
+allow_all_imports: true
+hass_is_global: true
+path: /config/pyscript/modules/openhasp
+log_level: info
+
+apps:
+  openhasp_manager:
+
+logger:
+  default: info
+  logs:
+    custom_components.pyscript: info
+    custom_components.pyscript.openhaps_manager.main: info

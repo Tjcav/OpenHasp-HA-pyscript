@@ -43,8 +43,6 @@ ICON_CHEVRON_LEFT = "\uE141"
 ICON_CHEVRON_RIGHT = "\uE142"
 ICON_CHEVRON_UP = "\uE143"
 
-
-
 logDiscovery = True
 logOnline = True
 logSendDesign = True
@@ -64,15 +62,14 @@ class Link(object):
 
 class Obj():
 
-    def __init__(self, design, coord=None, size=None, extraPar=None):
+    def __init__(self, design, coord=None, size=None, extraPar={}):
         self.Obj__init__(design, "Obj", coord, size, extraPar)
 
-    def Obj__init__(self, design, type=None, coord=None, size=None, extraPar=None):
+    def Obj__init__(self, design, objType=None, coord=None, size=None, extraPar={}):
         self.design = design
-        self.type = type
-        self.params = {}
-        if type is not None:
-            self.params["obj"] = type
+        self.objType = objType
+        if objType is not None:
+            self.params["obj"] = objType
         if extraPar is not None:
             self.params.update(extraPar)
         #assert isInstance(design, Design)
@@ -85,9 +82,10 @@ class Obj():
         if size is not None:
             self.setSize(size)
 
-
         # Add this object to the design, page and ID will be added there
         self.design.addObj(self)
+    def visible(self, isVisible):
+        self.setParam('hidden', not isVisible)
 
     def getpb(self):
         return f"p{self.params['page']}b{self.params['id']}"
@@ -136,7 +134,8 @@ class Obj():
         if value is None:
             raise Exception(f"Cannot set Param {param}")
         self.params[param] = value
-        if self.sent:
+        # send updates, unless msgbox
+        if self.sent and self.objType != "msgbox":
             if param == "text":
                 # Send all parameters so that text is passed as json 
                 self.send()
@@ -155,6 +154,9 @@ class Obj():
         self.toggleOnPushEntity = entity
 
     def actionOnPush(self, func):
+        self.actionOnPushFunc = func
+
+    def actionOnText(self, func):
         self.actionOnPushFunc = func
 
     def serviceOnPush(self, domain, name, **kvargs):
@@ -192,6 +194,14 @@ class Obj():
                     if hasattr(self, "actionOnValFunc"):  
                         self.actionOnValFunc(self, val)  
 
+                try:
+                    text = payload["text"]
+                except KeyError:
+                    pass
+                else:
+                    if hasattr(self, "actionOnTextFunc"):
+                        self.actionOnTextFunc(self, text)
+
     def _onEntityChange(self, cookie):
         link = cookie
         if not self.design.manager._checkInstanceId(link.instanceId, f"EntityChange {link.entity}"):
@@ -224,17 +234,68 @@ class Obj():
         # log.info(f"EntityChange {value}") 
         self.setParam(link.param, value)
 
-class Page(Obj):
+class MsgBox(Obj):
+    def __init__(self, design):
+        self.Obj__init__(design=design, objType="msgbox")
+        self.params['id'] = 1
+        
+    def message(self, text, options=None, auto_close=10000, extraPar={}, icon=None, actionOnPush=None):
+        self._initialize(text=text, options=options, auto_close=auto_close, extraPar=extraPar, icon=icon, actionOnPush=actionOnPush)
+        self._send()
+    
+    def _initialize(self, text, options=None, auto_close=10000, extraPar={}, icon=None, actionOnPush=None):
+        self.params["text"] = text
+        if options is not None:
+            self.params["options"] = options
+        self.params['auto_close'] = auto_close
+        self.setParam("text_color", extraPar.get('text_color'), "msgbox.text_color")
+        self.setParam("bg_color", extraPar.get('bg_color'), "btn.bg_color")
+        self.setParam("radius", extraPar.get('radius'), "btn.radius")
+        self.setParam("border_color", extraPar.get('border_color'), "msgbox.border_color")
+        self.setParam("border_width", extraPar.get('border_width'), "btn.border_width")
+        self.setShadow(None, "msgbox")
+        if actionOnPush is not None:
+            self.actionOnTextFunc = actionOnPush
+        if icon is not None:
+            self._addIcon(icon)
+        if extraPar is not None:
+            self.params.update(extraPar)
 
-    def __init__(self, design, pageNbr, isStartupPage=False, extraPar=None):
+    def _send(self):
+        jsonl = "{"
+        for idx, (param, value) in enumerate(self.params.items()):
+            if idx != 0:
+                jsonl += ","
+            jsonl += f'"{param}": "{value}"'
+        jsonl += "}"
+        self.design.manager.sendCmd("jsonl", jsonl)
+
+    def _addIcon(self, icon, x, y):
+        self.setParam("value_str", icon)
+        self.setParam("value_font", None, "btn.icon.font")
+        self.setParam("value_ofs_x", x)
+        self.setParam("value_ofs_y", y)
+        self.setParam("value_color", None, "btn.text_color")
+
+class MsgBoxIcon():
+    def __init__(self, icon, x, y):
+        self.icon = icon
+        self.x = x
+        self.y = y
+
+class Page(Obj):
+    def __init__(self, design, pageNbr, isStartupPage=False, extraPar={}):
         self.pageNbr = pageNbr # Obj__init__ will register the page and the page number needs to be known, would be better if the constructors would not register immediately 
-        self.Obj__init__(design=design, type=None, extraPar=None) # Will add the page to the design
+        self.Obj__init__(design=design, objType=None, extraPar={}) # Will add the page to the design
         self.params["page"] = pageNbr
         self.setParam("bg_color", None, "page.gb_color")
 
         self.isStartupPage = isStartupPage
         self.objs = {}
-        self.lastId = 0
+        if pageNbr == 0:
+            self.lastId = 1 # Reserve page 0 id 1 for msgbox
+        else:
+            self.lastId = 0
         self.composedObjs = []
 
         if isStartupPage:
@@ -242,8 +303,8 @@ class Page(Obj):
 
     def addObj(self, obj):
         obj.setParam("page", self.pageNbr)
-        self.lastId += 1
-        id = self.lastId
+        id = 1 if isinstance(obj, MsgBox) else self.lastId + 1
+        self.lastId = id
         assert id < 255, "Too many objects on same page"
         obj.setParam("id", id)
 
@@ -261,19 +322,19 @@ class Page(Obj):
 
 class EmptyObj(Obj):
 
-    def __init__(self, design, coord, size, extraPar=None):
-        self.Obj__init__(design=design, type="Obj", coord=coord, size=size, extraPar = extraPar)
+    def __init__(self, design, coord, size, extraPar={}):
+        self.Obj__init__(design=design, objType="Obj", coord=coord, size=size, extraPar = extraPar)
         self.setParam("bg_opa", 0)
         self.setParam("border_side", 0)
 
 
 class Label(Obj):
 
-    def __init__(self, design, coord, size, text, font=None, textColor=None, align=None, mode=None, extraPar=None):
+    def __init__(self, design, coord, size, text, font=None, textColor=None, align=None, mode=None, extraPar={}):
         self.Label__init__(design, coord, size, text, font, textColor, align, mode, extraPar)
 
-    def Label__init__(self, design, coord, size, text="", font=None, textColor=None, align=None, mode=None, extraPar=None):
-        self.Obj__init__(design=design, type="label", size=size, coord=coord, extraPar=extraPar)
+    def Label__init__(self, design, coord, size, text="", font=None, textColor=None, align=None, mode=None, extraPar={}):
+        self.Obj__init__(design=design, objType="label", size=size, coord=coord, extraPar=extraPar)
         self.params["text"] = text
         self.setParam("text_font", font, "text.font")
         self.setParam("text_color", textColor, "text.color")
@@ -318,20 +379,20 @@ class Label(Obj):
 
 
 class Button(Label):
-    def __init__(self, design, coord, size, text, font=None, align=None, extraPar=None):
+    def __init__(self, design, coord, size, text, font=None, align=None, extraPar={}):
         self.Button__init__(design, coord, size, text, font, align, extraPar)
 
-    def Button__init__(self, design, coord, size, text, font=None, align=None, extraPar=None):
+    def Button__init__(self, design, coord, size, text, font=None, align=None, extraPar={}):
         self.Label__init__(design=design, coord=coord, size=size, text=text, font=font, align=align, extraPar=extraPar)
         self.params["obj"] = "btn"
 
         self.setParam("text_font", font, "btn.font")
-        self.setParam("text_color", None, "btn.text_color")
+        self.setParam("text_color", extraPar.get('text_color'), "btn.text_color")
         self.setParam("align", align, "btn.align")
-        self.setParam("bg_color", None, "btn.bg_color")
-        self.setParam("radius", None, "btn.radius")
-        self.setParam("border_color", None, "btn.border_color")
-        self.setParam("border_width", None, "btn.border_width")
+        self.setParam("bg_color", extraPar.get('bg_color'), "btn.bg_color")
+        self.setParam("radius", extraPar.get('radius'), "btn.radius")
+        self.setParam("border_color", extraPar.get('border_color'), "btn.border_color")
+        self.setParam("border_width", extraPar.get('border_width'), "btn.border_width")
 
         self.setShadow(None, "btn")
 
@@ -343,9 +404,25 @@ class Button(Label):
         self.setParam("value_ofs_y", y)
         self.setParam("value_color", None, "btn.text_color")
 
+class BtnMatrix(Label):
+    def __init__(self, design, coord, size, options, actionOnValFunc=None, extraPar={}):
+        self.BtnMatrix__init__(design, coord, size, options, actionOnValFunc, extraPar)
+
+    def BtnMatrix__init__(self, design, coord, size, options, actionOnValFunc=None, extraPar={}):
+        self.params={}
+        self.params["obj"] = "btnmatrix"
+        self.params["options"] = options
+        self.Obj__init__(design=design, objType="btnmatrix", coord=coord, size=size, extraPar=extraPar)
+        self.setParam("text_font", extraPar.get('font'), "btn.font")
+        self.setParam("text_color", extraPar.get('text_color'), "btn.text_color")
+        self.setParam("align", extraPar.get('align'), "btn.align")
+        self.setParam("bg_color", extraPar.get('bg_color'), "btn.bg_color")
+        if actionOnValFunc is not None:
+            self.actionOnValFunc = actionOnValFunc
+        self.setShadow(None, "btn")
 
 class OnOffButton(Button):
-    def __init__(self, design, coord, size, text, entity, font=None, icon=None, align=None, extraPar=None):
+    def __init__(self, design, coord, size, text, entity, font=None, icon=None, align=None, extraPar={}):
         self.Button__init__(design=design, coord=coord, size=size, text=text, font=font, align=align, extraPar=extraPar)
         self.entity = entity
 
@@ -357,8 +434,8 @@ class OnOffButton(Button):
 
 
 class Line(Obj):
-    def __init__(self, design, points, width=None, color=None, extraPar=None):
-        self.Obj__init__(design=design, type="line", extraPar=extraPar)
+    def __init__(self, design, points, width=None, color=None, extraPar={}):
+        self.Obj__init__(design=design, objType="line", extraPar=extraPar)
         self.setPoints(points)
 
         self.setParam("line_width", width, "line.width")
@@ -370,7 +447,7 @@ class Line(Obj):
 
 class Image(Obj):
     def __init__(self, design, coord, size=None, src=None, resize=False, center=True):
-        self.Obj__init__(design=design, type="img", coord=coord, size=size)
+        self.Obj__init__(design=design, objType="img", coord=coord, size=size)
         self.size = size
         self.coord = coord
         self.resize = resize
@@ -405,7 +482,7 @@ class Image(Obj):
 
 class Switch(Obj):
     def __init__(self, design, coord, size, entity=None):
-        self.Obj__init__(design=design, type="switch", size=size, coord=coord)
+        self.Obj__init__(design=design, objType="switch", size=size, coord=coord)
         
         self.setParam("border_color", None, "switch.border_color")
         self.setParam("bg_color00", None, "switch.off.bg_color")  
@@ -436,7 +513,7 @@ class Switch(Obj):
 
 class Slider(Obj):
     def __init__(self, design, coord, size, entityBrightness=None, adaptColorTemp=False):
-        self.Obj__init__(design=design, type="slider")
+        self.Obj__init__(design=design, objType="slider")
         self.setCoord(coord)
         self.setSize(size)
         
@@ -483,7 +560,7 @@ class Slider(Obj):
 
 class Arc(Obj):
     def __init__(self, design, coord, size, min=0, max=100, value=50, rotation=270, color=None, adjustable=False, startAngle=0, endAngle=360):
-        self.Obj__init__(design=design, type="arc", coord=coord, size=size)
+        self.Obj__init__(design=design, objType="arc", coord=coord, size=size)
 
         self.setParam("min", min)
         self.setParam("max", max)
@@ -510,7 +587,6 @@ class Arc(Obj):
     def setValue(self, value):
         self.setParam("val", value)
 
-
 class Design():
     def __init__(self, manager, screenSize, style=None):
         self.manager = manager
@@ -519,11 +595,12 @@ class Design():
         self.lastPageAdded = None
         self.style = style if style is not None else {}
         self.screenBackgroundColor = "Black"
-
         self.pages = {}
         self.otherObjs = [] # Objects that are no HAPS objects but for which a reference needs to be kept
         self.timeTickObjs = [] # objects that need a timertick
         self.currPageNbr = None    # The page that is being displayed
+        Page(self, 0)
+        self.msgbox = MsgBox(self)
 
     def updateStyle(self, style):
         self.style.update(style)
@@ -535,8 +612,11 @@ class Design():
         return page
 
     def addObj(self, obj):
-        if type(obj) == Page:
-            return self.addPage(obj)
+        if isinstance(obj, Page):
+            newpage = self.addPage(obj)
+            return newpage
+        elif isinstance(obj, MsgBox):
+            return self.pages[0].addObj(obj)
         else:
             # The object is added to the page that was last defined
             return self.lastPageAdded.addObj(obj)
@@ -1067,14 +1147,14 @@ class Manager():
                 state.setattr(f"{self.entity}.{attr}", value+1)
 
 
-    def __init__(self, name, screenSize, startupPage=1, keepHAState=False):
-        self.Manager__init__(name, screenSize, startupPage, keepHAState)
+    def __init__(self, name, screenSize, startupPage=1, keepHAState=False, style=None):
+        self.Manager__init__(name, screenSize, startupPage, keepHAState, style)
 
-    def Manager__init__(self, name, screenSize, startupPage=1, keepHAState=False):
+    def Manager__init__(self, name, screenSize, startupPage=1, keepHAState=False, style=None):
         global screenName2manager
         self.name = name
         self.sendHeartbeat = False
-        self.design = Design(self, screenSize)
+        self.design = Design(self, screenSize, style)
         self.startupPage = startupPage
         self.style = {}
         self.designSentTime = None
@@ -1129,16 +1209,6 @@ class Manager():
     def sendHeatbeat(self):
         self.sendCmd("custom/heartbeat")
 
-    def sendMsgBox(self, text, textColor=None, bgColor=None, autoClose=1000):
-        jsonl = "{" 
-        jsonl += f'"page":0,"id":255,"obj":"msgbox","text":"{text}","auto_close":{autoClose},"radius":15' 
-        if textColor is not None:
-            jsonl += f',"text_color":"{textColor}"'
-        if bgColor is not None:
-            jsonl += f',"bg_color":"{bgColor}"'
-        jsonl += "}"
-        self.sendCmd("jsonl", jsonl)
-
     def setBacklight(self, level):
         state = "on" if level > 0 else "off"
         self.sendCmd("backlight", "{" + f'"state":"{state}","brightness":{(level * 255) // 100}'+ "}")
@@ -1159,27 +1229,27 @@ class Manager():
         task.sleep(1)
         self.sendCmd("clearpage", "all")
         task.sleep(3)
-        self.sendMsgBox("Receiving design form HA...", bgColor="Orange", textColor="White", autoClose=10000)
-        
+        self.design.msgbox.message(text="Receiving design from HA...", auto_close=10000)
         jsonl = ""
         for page in self.design.pages.values():
             jsonl += page.getJsonl()
             page.sent = True
             for obj in page.objs.values():
-                n = obj.getJsonl()
-                if len(jsonl)+len(n) > 2000:
-                    self.sendCmd("jsonl", jsonl)
-                    if logSendDesignDetail: log.info(f"Sending {len(jsonl)} bytes of json")
-                    jsonl = n
-                else:
-                    jsonl += n + "\r\n"
-                obj.sent = True
+                if type(obj) != MsgBox:
+                    n = obj.getJsonl()
+                    if len(jsonl)+len(n) > 2000:
+                        self.sendCmd("jsonl", jsonl)
+                        if logSendDesignDetail: log.info(f"Sending {len(jsonl)} bytes of json")
+                        jsonl = n
+                    else:
+                        jsonl += n + "\r\n"
+                    obj.sent = True
         if len(jsonl) > 0:
             if logSendDesignDetail: log.info(f"Sending (final) {len(jsonl)} bytes of json")
             self.sendCmd("jsonl", jsonl)
 
         task.sleep(5)
-        self.sendMsgBox("Design Received from HA", textColor="White", bgColor="Green")
+        self.design.msgbox.message(text="Design Received from HA", extraPar={"text_color":"#FFFFFF", "bg_color":"green","auto_close": 100})
 
     def gotoPage(self, pageNbr):
         self.sendCmd("page", f"{pageNbr}")
@@ -1197,14 +1267,14 @@ class Manager():
             if payload == "online":
                 if logOnline: log.info(f"Plate {self.name} Online")
                 self.state.activityDetected()
-                if (self.designSentTime is None) or (time.time()-self.designSentTime > 5): # Sometimes online event come quickly after one another
+                if (not self.sending_design) and (self.designSentTime is None or (time.time() - self.designSentTime > 5)):
                     designSentTime = time.time()
                     self.sendDesign()
                     self.gotoPage(self.startupPage)
         elif topic[2] == "state":
             obj = topic[3]
             #log.info(f"===> state of obj {obj}")
-            if re.search("p[0-9]+b[0-9]+", obj) is not None:
+            if re.search("p[0-9]+b[1-9]+", obj) is not None:
                 # it has the pb format
                 pb = obj.split("b")
                 p = int(pb[0][1:])
@@ -1212,9 +1282,12 @@ class Manager():
                 #log.info(f"Event for p={p} b={b}")
                 try:
                     obj = self.design.pages[p].objs[b]
+                    obj.onStateMsg(topic, payload)
                 except KeyError:
-                    log.info(f"MQTT event on unknown pb {obj}")
-                obj.onStateMsg(topic, payload)
+                    log.info(f"MQTT event on unknown pb {obj}: {payload}")
+            elif re.search("p[0-9]+b0",obj) is not None:
+                # page clicked
+                pass
             elif obj == "sensors":
                 sensors = json.loads(payload)
                 self.state.activityDetected()
